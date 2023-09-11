@@ -1,28 +1,54 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <script src="math.js"></script>
     <script src="p5.js"></script>
+    <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
     <main>
         <pre style="position:absolute; left:20px; top:10px" id="method"></pre>
         <pre style="position:absolute; right:20px; top:30px" id="collisions"></pre>
-        <div id ="canvas"></div>
-        <button id="pause">Pause</button>
-        <button id="step">Step</button>
-        <button id="rewind">Rewind</button>
-        <button id="reset">Reset</button>
-        <button id="reset_rewind">Reset & rewind</button>
-        <label>t=</label>
-        <input style="width: 30px;" id="delta_t" value="1">
-        <label>config=</label>
-        <input style="width: 30px;" id="config" value="1">
-        <button id="clear">Clear</button>
-        <label>Show history</label>
-        <input type="checkbox" id="show_history">
-        <pre id="bodies" name="bodies"></pre>
+        <div id="container">
+            <div>
+                <div id="canvas"></div>
+                <button id="pause">Play/Pause</button>
+                <button id="step">Step</button>
+                <button id="rewind">Rewind</button>
+                <button id="reset">Reset</button>
+                <button id="reset_rewind">Reset & rewind</button>
+                <label>t=</label>
+                <input style="width: 30px;" id="delta_t" value="1">
+                <label>config=</label>
+                <input style="width: 30px;" id="config" value="1">
+                <button id="clear">Clear</button>
+                <label>Show history</label>
+                <input type="checkbox" id="show_history" checked>
+                <pre id="bodies" name="bodies"></pre>
+            </div>
+            <div id="controls">
+                <p>Controls:</p>
+                <p>Play/Pause - play or pause</p>
+                <p>Step - make another simulation step</p>
+                <p>Rewind - make 40 steps backwards</p>
+                <p>Reset - remove all bodies from the scene and load the specified config again</p>
+                <p>Reset & rewind - reset and rewind</p>
+                <p>t - the size of delta time</p>
+                <p>config - number of a scene to simulate</p>
+                <p>Clear - remove all bodies</p>
+                <p>Show history* - show previous positions of bodies based on their current velocity</p>
+                <p>*Works only when the engine is paused. Also highlights collisions in the past with red</p>
+                <br>
+                <p>While paused you can drag the bodies, and change their speed by dragging the red arrow heads</p>
+            </div>
+        </div>
+        <script src="utils.js"></script>
+        <script src="qp_solver.js"></script>
+        <script src="collision_resolver.js"></script>
         <script src="main.js"></script>
     </main>
 </body>
+
 </html>

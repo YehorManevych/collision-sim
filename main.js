@@ -17,6 +17,7 @@ const sketch = function (p) {
     class Body {
         constructor(p, v) {
             this.p = p;
+            this.d = D
             this.v = v;
         }
 
@@ -24,7 +25,6 @@ const sketch = function (p) {
             return `${this.id}, p:${this.p}, v:${this.v}`
         }
     }
-
 
     let bodies = [];
     let config = 20;
@@ -277,11 +277,11 @@ const sketch = function (p) {
                 bodies = [
                     new Body(toScreen(vec(-d, 0)), vec(Vmax, 0)),
                     new Body(toScreen(vec(0, 0)), vec(0, 0)),
-                    new Body(toScreen(vec(0, D).rotate(p.PI/6-0.1)), vec(0, 0)),
-                    new Body(toScreen(vec(0, -D).rotate(-p.PI/6+0.1)), vec(0, 0)),
+                    new Body(toScreen(vec(0, D).rotate(p.PI / 6 - 0.1)), vec(0, 0)),
+                    new Body(toScreen(vec(0, -D).rotate(-p.PI / 6 + 0.1)), vec(0, 0)),
                 ]
                 break;
-                
+
             case 21:
                 bodies = [
                     new Body(vec(275, 475), vec(5, 0)),
@@ -302,414 +302,8 @@ const sketch = function (p) {
         }
     }
 
-    let drawDebug = [];
-
-    function getN(collisions) {
-        let N = m.zeros(2, collisions.length);
-        for (let i = 0; i < collisions.length; i++) {
-            let c = collisions[i];
-            let n = subv(c.b.p, c.a.p).normalize();
-
-            N.set([0, i], n.x);
-            N.set([1, i], n.y);
-        }
-        return N;
-    }
-
-    function getK(collisions, n_bodies) {
-        let Cm = m.zeros(n_bodies, collisions.length);
-        collisions.forEach((c, i) => {
-            Cm.set([c.a_group_id, i], -1);
-            Cm.set([c.b_group_id, i], 1);
-        });
-        return Cm;
-    }
-
-    //rewrite using array of bodies in the group
-    function getV(collisions, n_bodies) {
-        let V = m.zeros(2, n_bodies);
-        let filled_V = [];
-        for (let i = 0; i < collisions.length; i++) {
-            let c = collisions[i];
-            if (!filled_V[c.a_group_id]) {
-                V.set([0, c.a_group_id], c.a.v.x);
-                V.set([1, c.a_group_id], c.a.v.y);
-                filled_V[c.a_group_id] = true;
-            }
-            if (!filled_V[c.b_group_id]) {
-                V.set([0, c.b_group_id], c.b.v.x);
-                V.set([1, c.b_group_id], c.b.v.y);
-                filled_V[c.b_group_id] = true;
-            }
-        }
-        return V;
-    }
-
-    function getC(collisions) {
-        let C = m.zeros(collisions.length, collisions.length);
-        for (let i = 0; i < collisions.length; i++) {
-            for (let j = i + 1; j < collisions.length; j++) {
-                let c_r = collisions[i];
-                let c_c = collisions[j];
-                if (c_r.a_group_id == c_c.a_group_id) {
-                    C.set([i, j], 1);
-                } else if (c_r.b_group_id == c_c.b_group_id) {
-                    C.set([i, j], 1);
-                } else if (c_r.b_group_id == c_c.a_group_id) {
-                    C.set([i, j], -1);
-                }
-            }
-        }
-        C = m.add(
-            m.transpose(C),
-            C,
-            m.multiply(2, m.identity(collisions.length))
-        );
-        return C;
-    }
-
-    function g1(A, b, j) {
-        return m.add(m.multiply(A, j), b);
-    }
-
-    function f1(A, b, j) {
-        let g = g1(A, b, j);
-        let r = m.multiply(m.transpose(j), g).get([0, 0]);
-        return r;
-    }
-
-    function f(A, b, j, t) {
-        let g = g1(A, b, j);
-        let l = m.sum(m.add(m.log2(j), m.log2(g)));
-        let r = m.multiply(m.transpose(j), g).get([0, 0]) - t * l;
-        return r;
-    }
-
-    function f_alt(A, b, j, t) {
-        let g = g1(A, b, j);
-        let l = m.sum(m.log2(j));
-        let r = m.multiply(m.transpose(j), g).get([0, 0]) - t * l;
-        return r;
-    }
-
-    function df(A, b, j, t) {
-        let r = m.subtract(
-            g1(m.multiply(A, 2), b, j),
-            m.multiply(
-                t,
-                m.add(
-                    m.map(j, (e) => 1 / e),
-                    m.multiply(
-                        m.transpose(A),
-                        m.map(g1(A, b, j), (e) => 1 / e)
-                    )
-                )
-            )
-        );
-        return r;
-    }
-
-    
-    function ddf(A, b, j, t) {
-        let g = g1(A, b, j);
-
-        let l = m.multiply(
-            -1,
-            m.add(
-                m.diag(
-                    m.diag(m.map(m.multiply(j, m.transpose(j)), (e) => 1 / e))
-                ),
-                m.multiply(
-                    m.transpose(A),
-                    m.diag(
-                        m.diag(m.map(m.multiply(g, m.transpose(g)), (e) => 1 / e))
-                    ),
-                    A
-                )
-            )
-        );
-        let r = m.subtract(m.multiply(2, A), m.multiply(t, l));
-        return r;
-    }
-
-    let t_iter = 0
-    let jk_iter = 0
-
-
-    const t_start = 1000
-    const t_min = 0.000001
-    const divisor = 2;
-
-    function find_init_point(A, b) {
-        let j_init = m.matrix(m.zeros(b.size()))
-        let j = j_init
-
-        while (true) {
-            let g_max
-            let g_i_max
-            let g2_max
-            let g2_i_max
-            let s
-            function calcS() {
-                let g = m.multiply(g1(A, b, j), -1)
-                //max element in g
-                g_max = -Infinity
-                g_i_max = 0
-                g.forEach((e, i) => {
-                    let row = i[0]
-                    if (e > g_max) {
-                        g_max = e
-                        g_i_max = row
-                    }
-                });
-
-                let g2 = m.multiply(j, -1)
-                //max element if g2
-                g2_max = -Infinity
-                g2_i_max = 0
-                g2.forEach((e, i) => {
-                    let row = i[0]
-                    if (e > g2_max) {
-                        g2_max = e
-                        g2_i_max = row
-                    }
-                });
-
-
-                s = g_max > g2_max ? g_max : g2_max
-                s += 0.1
-            }
-            calcS()
-            if (s < 0) {
-                return j
-            }
-
-            //decide whether to take the grad of g or g2
-            let grad
-            if (g_max > g2_max) {
-                //find grad
-                //g = -Aj - b
-                //grad = row of A corresponding to the max element in g
-                // grad = m.diag(m.multiply(A,-1)).reshape(b.size())
-                let row = m.row(m.multiply(A, -1), g_i_max)
-                //check if row is a matrix or just a number
-                if (row.size) {
-                    grad = row.reshape(b.size())
-                } else {
-                    grad = m.matrix([[row]])
-                }
-            } else {
-                grad = m.matrix(m.zeros(j.size()))
-                grad.set([g2_i_max, 0], -1)
-            }
-            let lambda = 1
-
-            //to minimize s we should move against the gradient
-            let step = m.multiply(grad, -lambda)
-
-            j = m.add(j, step)
-        }
-    }
-
-    function calcJ(A, b) {
-        t_iter = 0
-        jk_iter = 0
-        let t = t_start
-        let jk_start = find_init_point(A, b)
-        let jk = jk_start;
-        let t_too_small = false;
-        let prevT = t;
-        let result = { j: jk, t: t };
-        while (!t_too_small && t > t_min) {
-            while (true) {
-                jk_iter += 1
-                let jk1 = m.subtract(
-                    jk,
-                    m.multiply(m.inv(ddf(A, b, jk, t)), df(A, b, jk, t))
-                );
-
-                let collisionsN = m.size(b).get([0])
-
-                m.reshape(jk1, [collisionsN]);
-                m.reshape(jk, [collisionsN]);
-
-                let j_diff = m.norm(m.subtract(jk1, jk));
-                m.reshape(jk1, [collisionsN, 1]);
-                m.reshape(jk, [collisionsN, 1]);
-                let fv = f(A, b, jk1, t);
-                if (isNaN(fv)) {
-                    t_too_small = true;
-                    result = { j: jk, t: prevT };
-                    break;
-                } else if (j_diff < 0.0001) {
-                    result = { j: jk1, t: t };
-                    break;
-                }
-                jk = jk1;
-            }
-            prevT = t;
-            t = t / divisor;
-            t_iter += 1
-        }
-        return result;
-    }
-
-
-    function detectCollisions() {
-        let collisions = [];
-        for (let i = 0; i < bodies.length; i++) {
-            for (let j = i + 1; j < bodies.length; j++) {
-                let a = bodies[i];
-                let b = bodies[j];
-
-                let overlap = D - a.p.dist(b.p)
-                let epsilon = -0.00000000001
-                if (overlap >= epsilon) {
-                    collisions.push({
-                        name: `${a.id}${b.id}`,
-                        overlap: overlap,
-                        a: a,
-                        b: b,
-                    });
-                }
-            }
-        }
-        return collisions;
-    }
-
-
-    function traverseSubgraph(node, neighbours_by_node, visited, edges, bodies_in_group) {
-        visited[node] = true;
-        let neighbours = neighbours_by_node[node];
-
-        for (let j = 0; neighbours && j < neighbours.length; j++) {
-            let n = neighbours[j];
-            bodies_in_group[node] = true
-            bodies_in_group[n] = true
-
-            edges[node][n] = true
-            edges[n][node] = true
-            if (!visited[n]) {
-                traverseSubgraph(n, neighbours_by_node, visited, edges, bodies_in_group);
-            }
-        }
-    }
-
-    class Collision {
-        constructor(a_group_id, a, b_group_id, b) {
-            this.name = a.id.toString() + b.id.toString()
-            this.a_group_id = a_group_id
-            this.a = a
-            this.b_group_id = b_group_id
-            this.b = b
-        }
-    }
-
-    class CollisionGroup {
-        constructor(collisions, n_bodies) {
-            this.collisions = collisions
-            this.n_bodies = n_bodies
-        }
-
-        toString = () => {
-            return '[' + this.collisions.reduce((acc, x) => acc + x.name + ', ', '') + '] ' + this.n_bodies
-        }
-    }
-
-    function getGroupsOfCollisions(collisions) {
-        let neighbours_by_node = []
-        bodies.forEach((_, i) => {
-            neighbours_by_node[i] = [];
-        })
-        collisions.forEach((c, i) => {
-            neighbours_by_node[c.a.id].push(c.b.id);
-            neighbours_by_node[c.b.id].push(c.a.id);
-        })
-
-
-        let groups = [];
-        let visited = [];
-        for (let i = 0; i < bodies.length; i++) {
-            if (!visited[i]) {
-                let edges = []
-                bodies.forEach((_, i) => edges[i] = [])
-
-                let bodies_in_group = [];
-                traverseSubgraph(i, neighbours_by_node, visited, edges, bodies_in_group);
-
-                let edgesSorted = []
-                bodies.forEach((_, i) => {
-                    for (let j = i + 1; j < bodies.length; j++) {
-                        if (edges[i][j]) {
-                            edgesSorted.push({ a: i, b: j })
-                        }
-                    }
-                })
-
-                if (bodies_in_group.length > 0) {
-                    let vacant_group_id = 0
-                    let group_id_by_id = []
-                    bodies_in_group.forEach((x, i) => {
-                        if (x) {
-                            group_id_by_id[i] = vacant_group_id
-                            vacant_group_id += 1
-                        }
-                    })
-                    let collisions = edgesSorted.map((e) => {
-                        return new Collision(
-                            group_id_by_id[e.a],
-                            bodies[e.a],
-                            group_id_by_id[e.b],
-                            bodies[e.b]
-                        )
-                    });
-                    groups.push(new CollisionGroup(
-                        collisions,
-                        bodies_in_group.filter(x => x).length));
-                }
-            }
-        }
-        return groups;
-    }
-
-    let _t
-    let _A
-    let _b
-    let _j
-
-    function resolveGroupOfCollisions(g) {
-        const { collisions, n_bodies } = g;
-        let N = getN(collisions);
-        let V = getV(collisions, n_bodies);
-        let K = getK(collisions, n_bodies);
-        let C = getC(collisions, n_bodies);
-
-        let Vrel = m.dotMultiply(N, m.multiply(V, K));
-
-        let A = m.dotMultiply(m.multiply(m.transpose(N), N), C);
-        _A = A
-        let b = m.multiply(m.reshape(m.apply(Vrel, 0, m.sum), [collisions.length, 1]), 2);
-        _b = b
-
-        let { j, t } = calcJ(A, b)
-        _t = t
-        _j = j
-
-        let newV = m.add(V, m.multiply(m.dotMultiply(m.transpose(m.concat(j, j)), N), m.transpose(K)))
-        collisions.forEach(c => {
-            let newVa_x = newV.get([0, c.a_group_id])
-            let newVa_y = newV.get([1, c.a_group_id])
-            c.a.v = vec(newVa_x, newVa_y)
-
-            let newVb_x = newV.get([0, c.b_group_id])
-            let newVb_y = newV.get([1, c.b_group_id])
-            c.b.v = vec(newVb_x, newVb_y)
-        })
-    }
-
-
     function resolveCollisions() {
-        let collisions = detectCollisions();
+        let collisions = detectCollisions(bodies);
         let choise = null
         for (let i = 0; i < collisions.length; i++) {
             let cur = collisions[i]
@@ -731,28 +325,31 @@ const sketch = function (p) {
             let stepback = overlap / relv;
             updateBodies(-stepback);
 
-            let groups = getGroupsOfCollisions(collisions);
+            let groups = getGroupsOfCollisions(collisions, bodies);
             showGroupsOfCollisions(groups)
             for (let i = 0; i < groups.length; i++) {
                 let g = groups[i];
                 resolveGroupOfCollisions(g);
 
-                let text = t_iter.toString()
-                    + ' ' + jk_iter
-                    + ' t: ' + p.round(_t, 7)
-                    + ' f: ' + p.round(f(_A, _b, _j, _t), 5)
-                    + ' f1: ' + p.round(f1(_A, _b, _j), 5)
-                    + '  >  ' + t_start
-                    + '  ' + t_min
-                    + '  /' + divisor
-                    + '\n'
-                document.getElementById('method').innerHTML = text
+                updateDebugInfo()
             }
 
             updateBodies(stepback);
         }
     }
 
+    function updateDebugInfo(){
+        let text = t_iter.toString()
+        + ' ' + jk_iter
+        + ' t: ' + p.round(_t, 7)
+        + ' f: ' + p.round(f(_A, _b, _j, _t), 5)
+        + ' f1: ' + p.round(f1(_A, _b, _j), 5)
+        + '  >  ' + T_START
+        + '  ' + T_MIN
+        + '  /' + DIVISOR
+        + '\n'
+        document.getElementById('method').innerHTML = text
+    }
 
     function showGroupsOfCollisions(groups) {
         if (groups.length > 0) {
@@ -771,7 +368,6 @@ const sketch = function (p) {
     }
 
     function updateBody(b, dt) {
-
         b.p = addv(b.p, multv(b.v, dt));
     }
 
@@ -781,9 +377,7 @@ const sketch = function (p) {
             drawArrow(b.p, multv(b.v, ARROW_UNIT), 'red', '', true)
             p.strokeWeight(1)
             p.stroke('black')
-            // p.text(b.p.x + ', '+ b.p.y, b.p.x+D/2, b.p.y-D/2)
             p.textSize(18)
-            // p.text(b.v.x + ', '+ b.v.y, b.p.x+D/2, b.p.y)
         }
     }
 
@@ -889,15 +483,15 @@ const sketch = function (p) {
     }
 
     let clear_button = document.getElementById("clear")
-    clear_button.onclick = () => {bodies = []}
+    clear_button.onclick = () => { bodies = [] }
 
-    let show_history = false
+    let show_history = true
 
     let show_history_check = document.getElementById("show_history")
     show_history_check.onchange = function () {
-        if(show_history_check.checked){
+        if (show_history_check.checked) {
             show_history = true
-        }else{
+        } else {
             show_history = false
         }
     }
@@ -920,7 +514,7 @@ const sketch = function (p) {
                 p.circle(b.p.x, b.p.y, D);
             })
 
-            let collisions = detectCollisions().reduce((acc, c) => acc.concat([c.a, c.b]), [])
+            let collisions = detectCollisions(bodies).reduce((acc, c) => acc.concat([c.a, c.b]), [])
             p.stroke('red')
             collisions.forEach(c => {
                 p.circle(c.p.x, c.p.y, D);
@@ -947,11 +541,11 @@ const sketch = function (p) {
                 updateTextarea()
             }
 
-            if(show_history){
+            if (show_history) {
                 drawHistory()
             }
-            let collisions = detectCollisions()
-            let groups = getGroupsOfCollisions(collisions)
+            let collisions = detectCollisions(bodies)
+            let groups = getGroupsOfCollisions(collisions, bodies)
             showGroupsOfCollisions(groups)
         }
 
@@ -959,43 +553,9 @@ const sketch = function (p) {
             drawBody(bodies[i]);
         }
         drawMeta()
-        drawDebug.forEach((d) => d());
     }
 
     let toScreen = (v) => p.createVector(W / 2, H / 2).add(v);
-
-    let vec = (x, y) => {
-        return new p5.Vector(x, y);
-    };
-    let addv = function () {
-        let sum = vec(0, 0)
-        for (let i = 0; i < arguments.length; i++) {
-            sum.add(arguments[i])
-        }
-        return sum
-    }
-    let rotv = p5.Vector.rotate;
-
-    let subv = p5.Vector.sub;
-    let multv = p5.Vector.mult;
-
-    p5.Vector.prototype.toString = function () {
-        return `[${p.round(this.x)}, ${p.round(this.y)}]`
-    }
-
-    Array.prototype.max = function (f) {
-        let r = null;
-        this.forEach((x) => {
-            if (r == null || f(x) > r) {
-                r = x;
-            }
-        });
-        return r;
-    };
-
-    Array.prototype.empty = function (f) {
-        return this.length == 0;
-    };
 
     function drawArrow(base, vec, myColor, name, drawMag = false) {
         p.push();
